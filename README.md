@@ -48,24 +48,31 @@ The following Arduino libraries are required to compile the firmware:
 ![Basic Protection circuit](./images/Basic_Protection_circuit.png)
 *Figure 1: Basic Protection circuit.*
 
+
 ![Instrumentation amplifier](./images/Instrumentation_amplifier.png)
 *Figure 2: Instrumentation amplifier.*
+
 
 ![High pass filter](./images/High_pass_filter.png)
 *Figure 3: High pass filter with Bode plot.*
 
+
 ![Low pass filter](./images/Low_pass_filter.png)
 *Figure 4: Low pass filter with Bode plot.*
+
 
 ![Notch filter](./images/Notch_filter.png)
 *Figure 5: Notch filter with Bode plot.*
 
+
 ![Complete_EEG_circuit](./images/Complete_EEG_circuit.png)
 *Figure 6: Complete EEG circuit.*
+
 
 ### ESP32 Interface
 ![ESP32 Connection](./images/EEG_and_ESP32.png)
 *Figure 7: Interfacing the analog front-end with the ESP32.*
+
 
 ## How to Run
 1. Connect the EEG electrodes to the acquisition circuit and link the output to the **ESP32 ADC pin**.
@@ -74,4 +81,5 @@ The following Arduino libraries are required to compile the firmware:
 4. Open **index.html** in a web browser to view the live EEG stream.
 
 ---
+
 For a detailed technical analysis including gain calculations and test results, please refer to the [Full Project Report](./docs/Wireless_EEG_Machine_Project.pdf).
