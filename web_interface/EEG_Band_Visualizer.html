@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>EEG Band Visualizer</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    canvas { border: 1px solid #ccc; margin-bottom: 20px; width: 100%; height: 140px; }
+    .label { font-weight: bold; margin-top: 25px; font-size: 1.1em; }
+    button { margin-right: 10px; padding: 8px 16px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h2>EEG Band Visualizer (Real-time, 250 Hz)</h2>
+
+  <div>
+    <button id="pauseBtn">⏸ Pause</button>
+    <button id="downloadBtn">📁 Export CSV</button>
+  </div>
+
+  <div class="label">Raw EEG Signal</div>
+  <canvas id="rawCanvas" width="2400" height="140"></canvas>
+
+  <div class="label">Delta (0.5–4 Hz)</div>
+  <canvas id="deltaCanvas" width="2400" height="140"></canvas>
+
+  <div class="label">Theta (4–8 Hz)</div>
+  <canvas id="thetaCanvas" width="2400" height="140"></canvas>
+
+  <div class="label">Alpha (8–13 Hz)</div>
+  <canvas id="alphaCanvas" width="2400" height="140"></canvas>
+
+  <div class="label">Beta (13–30 Hz)</div>
+  <canvas id="betaCanvas" width="2400" height="140"></canvas>
+
+  <script>
+    const IP = "192.168.45.8";  // ⬅️ Replace with your ESP32's IP
+    const ws = new WebSocket(`ws://${IP}:81/`);
+    const sampleRate = 250;
+
+    const bufferLength = 2400; // 2400 samples = 9.6 sec @ 250Hz
+    let isPaused = false;
+    let raw = Array(bufferLength).fill(2048);
+    let delta = Array(bufferLength).fill(0);
+    let theta = Array(bufferLength).fill(0);
+    let alpha = Array(bufferLength).fill(0);
+    let beta  = Array(bufferLength).fill(0);
+
+    const fullData = [];
+
+    const canvases = {
+      raw: document.getElementById("rawCanvas").getContext("2d"),
+      delta: document.getElementById("deltaCanvas").getContext("2d"),
+      theta: document.getElementById("thetaCanvas").getContext("2d"),
+      alpha: document.getElementById("alphaCanvas").getContext("2d"),
+      beta: document.getElementById("betaCanvas").getContext("2d"),
+    };
+
+    class BiquadFilter {
+      constructor(_, fLow, fHigh, sampleRate) {
+        const nyq = sampleRate / 2;
+        const f1 = fLow / nyq;
+        const f2 = fHigh / nyq;
+        const f0 = (f1 + f2) / 2;
+        const bw = f2 - f1;
+        const Q = f0 / bw;
+        const w0 = 2 * Math.PI * f0;
+        const alpha = Math.sin(w0) / (2 * Q);
+        const cos_w0 = Math.cos(w0);
+
+        const b0 = alpha;
+        const b1 = 0;
+        const b2 = -alpha;
+        const a0 = 1 + alpha;
+        const a1 = -2 * cos_w0;
+        const a2 = 1 - alpha;
+
+        this.b0 = b0 / a0;
+        this.b1 = b1 / a0;
+        this.b2 = b2 / a0;
+        this.a1 = a1 / a0;
+        this.a2 = a2 / a0;
+
+        this.x1 = this.x2 = this.y1 = this.y2 = 0;
+      }
+
+      process(x) {
+        const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2
+                - this.a1 * this.y1 - this.a2 * this.y2;
+        this.x2 = this.x1; this.x1 = x;
+        this.y2 = this.y1; this.y1 = y;
+        return y;
+      }
+    }
+
+    const deltaFilter = new BiquadFilter("bandpass", 0.5, 4, sampleRate);
+    const thetaFilter = new BiquadFilter("bandpass", 4, 8, sampleRate);
+    const alphaFilter = new BiquadFilter("bandpass", 8, 13, sampleRate);
+    const betaFilter  = new BiquadFilter("bandpass", 13, 30, sampleRate);
+
+    function draw(ctx, data, color = "black") {
+      const w = ctx.canvas.width;
+      const h = ctx.canvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw time axis
+      ctx.strokeStyle = "#aaa";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+
+      // Time ticks every 1 second (250 samples)
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#333";
+      for (let i = 0; i <= 9; i++) {
+        const x = i * 250;
+        ctx.beginPath();
+        ctx.moveTo(x, h / 2 - 5);
+        ctx.lineTo(x, h / 2 + 5);
+        ctx.stroke();
+        ctx.fillText(`${i}s`, x + 2, h - 10);
+      }
+
+      // Plot waveform
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2 - (data[0] - 2048) / 8);
+      for (let i = 1; i < data.length; i++) {
+        ctx.lineTo(i, h / 2 - (data[i] - 2048) / 8);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    ws.onmessage = (event) => {
+      if (isPaused) return;
+      const val = parseInt(event.data.trim());
+      if (isNaN(val)) return;
+
+      const d = deltaFilter.process(val);
+      const t = thetaFilter.process(val);
+      const a = alphaFilter.process(val);
+      const b = betaFilter.process(val);
+
+      raw.push(val);        raw.shift();
+      delta.push(d + 2048); delta.shift();
+      theta.push(t + 2048); theta.shift();
+      alpha.push(a + 2048); alpha.shift();
+      beta.push(b + 2048);  beta.shift();
+
+      fullData.push([Date.now(), val, d, t, a, b]);
+
+      draw(canvases.raw, raw, "#000");
+      draw(canvases.delta, delta, "#0033cc");
+      draw(canvases.theta, theta, "#6600cc");
+      draw(canvases.alpha, alpha, "#009900");
+      draw(canvases.beta, beta, "#cc6600");
+    };
+
+    document.getElementById("pauseBtn").onclick = () => {
+      isPaused = !isPaused;
+      document.getElementById("pauseBtn").textContent = isPaused ? "▶ Resume" : "⏸ Pause";
+    };
+
+    document.getElementById("downloadBtn").onclick = () => {
+      const csv = fullData.map(r =>
+        r.map(v => Math.round(v * 1000) / 1000).join(",")
+      );
+      csv.unshift("Timestamp,Raw,Delta,Theta,Alpha,Beta");
+      const blob = new Blob([csv.join("\n")], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "eeg_data.csv";
+      a.click();
+    };
+  </script>
+</body>
+</html>
